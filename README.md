@@ -34,7 +34,7 @@ The description in `SKILL.md` is intentionally emphatic:
 
 This wording was written by GLM-4.7 itself through iterative refinement until the model correctly triggered the skill 100% of the time on first try in testing.
 
-GLM-4.7 is convinced it's Claude (the z.ai API returns `claude-3-5-sonnet-20241022` as the model name). This is relevant because the description explicitly addresses "CLAUDE" - the model the agent believes itself to be. The aggressive, self-referential phrasing ("this is your ONLY way to understand visual content", "NO EXCEPTIONS") works because the model wrote instructions it would actually follow.
+GLM-4.7 is convinced it's Claude as the model name). This is relevant because the description explicitly addresses "CLAUDE" - the model the agent believes itself to be. The aggressive, self-referential phrasing ("this is your ONLY way to understand visual content", "NO EXCEPTIONS") works because the model wrote instructions it would actually follow.
 
 ## Why this approach
 
