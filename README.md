@@ -1,6 +1,6 @@
 # glm-vision
 
-A skill that gives text-only AI models (Claude, GLM-4.7) vision capabilities by delegating to GLM-4.6v.
+A skill that gives text-only GLM-4.7 vision capabilities by delegating to GLM-4.6v. A funny thing about GLM-4.7 is that it is CONVINCED it's name is claude, so you'll notice that claude is specified in the tool description even though this is targeted only at glm-4.7 because of glm-4.7's identity crisis. 
 
 ## What it does
 
