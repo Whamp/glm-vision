@@ -1,6 +1,6 @@
 ---
 name: glm-vision
-description: CLAUDE and GLM-4.7 (text-only) CANNOT process images or videos - you MUST ALWAYS delegate vision tasks to GLM-4.6v via this skill. This is your ONLY way to understand visual content. TRIGGER IMMEDIATELY when: user mentions image/video/screenshot/photo/diagram/chart, provides a file path ending in png/jpg/jpeg/gif/webp/mp4/mov/m4v, or references visual content. Use for: UI-to-code conversion, OCR text extraction, error diagnosis, technical diagrams (architecture/flowcharts/UML/ER), data visualizations, UI regression testing, or ANY visual analysis. NO EXCEPTIONS - if it involves pixels, use this skill.
+description: CLAUDE and GLM-4.7 (text-only) CANNOT process images or videos - you MUST ALWAYS delegate vision tasks to GLM-4.6v via this skill. This is your ONLY way to understand visual content. TRIGGER IMMEDIATELY when -> user mentions image/video/screenshot/photo/diagram/chart, provides a file path ending in png/jpg/jpeg/gif/webp/mp4/mov/m4v, or references visual content. Use for -> UI-to-code conversion, OCR text extraction, error diagnosis, technical diagrams (architecture/flowcharts/UML/ER), data visualizations, UI regression testing, or ANY visual analysis. NO EXCEPTIONS - if it involves pixels, use this skill.
 ---
 
 # GLM Vision
