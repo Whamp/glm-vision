@@ -1,18 +1,19 @@
 /**
  * GLM Image Summary Extension
  *
- * When using glm-4.7, this extension intercepts image reads and sends them
- * to glm-4.6v for detailed analysis using a subprocess. This provides better
- * image understanding since glm-4.6v has stronger vision capabilities.
+ * When using non-vision GLM models (glm-4.6, glm-4.7, glm-4.7-flash), this
+ * extension intercepts image reads and sends them to glm-4.6v for detailed
+ * analysis using a subprocess. This provides better image understanding since
+ * glm-4.6v has stronger vision capabilities.
  *
  * Usage:
- *   pi -e ~/.pi/agent/extensions/pi-glm-image-summary --provider zai --model glm-4.7
+ *   pi -e npm:pi-glm-image-summary --provider zai --model glm-4.7
  *
  * The extension will:
- * 1. Detect when glm-4.7 is the current model
+ * 1. Detect when a non-vision GLM model is being used
  * 2. Check if the file being read is an image
  * 3. Call pi subprocess with glm-4.6v to analyze the image
- * 4. Return the summary text to glm-4.7
+ * 4. Return the summary text to the current model
  */
 
 import { spawn } from "node:child_process";
@@ -66,12 +67,13 @@ export default function (pi: ExtensionAPI) {
 			const { path } = params;
 			const absolutePath = resolve(ctx.cwd, path);
 
-			// Check if current model is glm-4.7
+			// Check if current model is a non-vision GLM model
 			const currentModel = ctx.model;
-			const isGlm4_7 = currentModel?.id === "glm-4.7" || currentModel?.id === "glm-4.7-long";
+			const nonVisionModels = ["glm-4.6", "glm-4.7", "glm-4.7-flash"];
+			const needsVisionProxy = currentModel?.id && nonVisionModels.includes(currentModel.id);
 
-			// If not glm-4.7, use standard read
-			if (!isGlm4_7) {
+			// If not a non-vision model, use standard read
+			if (!needsVisionProxy) {
 				return localRead.execute(toolCallId, params, signal, onUpdate);
 			}
 

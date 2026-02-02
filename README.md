@@ -1,10 +1,10 @@
 # pi-glm-image-summary
 
-A [pi](https://github.com/badlogic/pi-mono) extension that intercepts image reads when using glm-4.7 and sends them to glm-4.6v for detailed analysis.
+A [pi](https://github.com/badlogic/pi-mono) extension that intercepts image reads when using non-vision GLM models and sends them to glm-4.6v for detailed analysis.
 
 ## Why?
 
-GLM-4.7 is a powerful text model but has limited vision capabilities. GLM-4.6v, on the other hand, has stronger vision support. This extension automatically detects when you're using glm-4.7 and intercepts image reads, sending them to glm-4.6v for comprehensive analysis.
+GLM text models (glm-4.6, glm-4.7, glm-4.7-flash) have no vision capabilities. GLM-4.6v does. This extension automatically detects when you're using a non-vision GLM model and intercepts image reads, sending them to glm-4.6v for comprehensive analysis.
 
 ## Features
 
