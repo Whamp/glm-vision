@@ -14,17 +14,31 @@ GLM-4.7 is a powerful text model but has limited vision capabilities. GLM-4.6v, 
 
 ## Installation
 
-The extension is already installed in `~/.pi/agent/extensions/pi-glm-image-summary/`.
+Install globally:
+
+```bash
+pi install npm:pi-glm-image-summary
+```
+
+Or install for a specific project (writes to `.pi/settings.json`):
+
+```bash
+pi install -l npm:pi-glm-image-summary
+```
+
+To try it without installing:
+
+```bash
+pi -e npm:pi-glm-image-summary
+```
 
 ## Usage
 
-Load the extension when starting pi:
+Once installed, the extension loads automatically when you start pi:
 
 ```bash
-pi -e ~/.pi/agent/extensions/pi-glm-image-summary --provider zai --model glm-4.7
+pi --provider zai --model glm-4.7
 ```
-
-Or add it to your pi config for automatic loading.
 
 ### Automatic Mode
 
