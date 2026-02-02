@@ -1,32 +1,44 @@
 {
-  "name": "pi-glm-image-summary",
-  "version": "0.1.1",
-  "type": "module",
-  "description": "Pi extension that intercepts image reads when using glm-4.7 and sends them to glm-4.6v for detailed analysis",
-  "keywords": [
-    "pi-package",
-    "glm",
-    "image",
-    "vision",
-    "ai"
-  ],
-  "author": "kaofelix",
-  "license": "MIT",
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/kaofelix/pi-glm-image-summary.git"
-  },
-  "files": [
-    "src"
-  ],
-  "scripts": {
-    "clean": "echo 'nothing to clean'",
-    "build": "echo 'nothing to build'",
-    "check": "echo 'nothing to check'"
-  },
-  "pi": {
-    "extensions": [
-      "./src/index.ts"
-    ]
-  }
+	"name": "pi-glm-image-summary",
+	"version": "0.1.1",
+	"type": "module",
+	"description": "Pi extension that intercepts image reads when using glm-4.7 and sends them to glm-4.6v for detailed analysis",
+	"keywords": [
+		"pi-package",
+		"glm",
+		"image",
+		"vision",
+		"ai"
+	],
+	"author": "kaofelix",
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/kaofelix/pi-glm-image-summary.git"
+	},
+	"files": [
+		"src"
+	],
+	"scripts": {
+		"format": "biome format --write .",
+		"lint": "biome lint .",
+		"typecheck": "tsc --noEmit",
+		"check": "biome check . && tsc --noEmit"
+	},
+	"pi": {
+		"extensions": [
+			"./src/index.ts"
+		]
+	},
+	"peerDependencies": {
+		"@mariozechner/pi-ai": "*",
+		"@mariozechner/pi-coding-agent": "*"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "^2.3.13",
+		"@mariozechner/pi-ai": "^0.51.0",
+		"@mariozechner/pi-coding-agent": "^0.51.0",
+		"@types/node": "^25.2.0",
+		"typescript": "^5.9.3"
+	}
 }

@@ -17,17 +17,15 @@
  */
 
 import { spawn } from "node:child_process";
-import type { TextContent } from "@mariozechner/pi-ai";
+import { resolve } from "node:path";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import {
-	BorderedLoader,
-	createReadTool,
-	type ReadOperations,
-	type ReadToolDetails,
-} from "@mariozechner/pi-coding-agent";
-import { constants } from "fs";
-import { access as fsAccess, readFile as fsReadFile } from "fs/promises";
-import { resolve } from "path";
+import { BorderedLoader, createReadTool } from "@mariozechner/pi-coding-agent";
+
+// Configuration
+const VISION_PROVIDER = "zai";
+const VISION_MODEL = "glm-4.6v";
+const NON_VISION_MODELS = ["glm-4.6", "glm-4.7", "glm-4.7-flash"];
+const SUPPORTED_IMAGE_EXTENSIONS = ["jpg", "jpeg", "png", "gif", "webp"];
 
 const SUMMARY_PROMPT = `Please analyze this image comprehensively. Extract ALL information from the image including:
 
@@ -41,163 +39,149 @@ const SUMMARY_PROMPT = `Please analyze this image comprehensively. Extract ALL i
 
 Format your response clearly with sections and bullet points. Be extremely thorough - the user needs to understand everything visible in this image to perform their task.`;
 
-export default function (pi: ExtensionAPI) {
-	const localCwd = process.cwd();
-	const localRead = createReadTool(localCwd);
+// Types for pi JSON output
+interface PiMessage {
+	role: string;
+	content?: PiContentBlock[];
+}
 
-	// Custom read operations that detect images
-	const readOps: ReadOperations = {
-		readFile: (path) => fsReadFile(path),
-		access: (path) => fsAccess(path, constants.R_OK),
-		detectImageMimeType: async (absolutePath: string) => {
-			// Simple MIME type detection
-			const ext = absolutePath.split(".").pop()?.toLowerCase();
-			const supported = ["jpg", "jpeg", "png", "gif", "webp"];
-			if (ext && supported.includes(ext)) {
-				return `image/${ext === "jpg" ? "jpeg" : ext}`;
+interface PiContentBlock {
+	type: string;
+	text?: string;
+}
+
+interface PiJsonOutput {
+	messages?: PiMessage[];
+}
+
+function isImageFile(path: string): boolean {
+	const ext = path.split(".").pop()?.toLowerCase();
+	return ext !== undefined && SUPPORTED_IMAGE_EXTENSIONS.includes(ext);
+}
+
+function extractTextFromPiOutput(output: string): string {
+	try {
+		const json: PiJsonOutput = JSON.parse(output);
+		if (json.messages && Array.isArray(json.messages)) {
+			const assistantMsg = json.messages.findLast((m: PiMessage) => m.role === "assistant");
+			if (assistantMsg?.content) {
+				return assistantMsg.content
+					.filter((c: PiContentBlock) => c.type === "text")
+					.map((c: PiContentBlock) => c.text ?? "")
+					.join("\n");
 			}
-			return null;
-		},
-	};
+		}
+	} catch {
+		// Not JSON, return as-is
+	}
+	return output;
+}
 
-	// Override the read tool
+interface AnalyzeImageOptions {
+	absolutePath: string;
+	signal?: AbortSignal;
+}
+
+async function analyzeImage({ absolutePath, signal }: AnalyzeImageOptions): Promise<string> {
+	return new Promise((resolve, reject) => {
+		const args = [
+			`@${absolutePath}`,
+			"--provider",
+			VISION_PROVIDER,
+			"--model",
+			VISION_MODEL,
+			"-p",
+			SUMMARY_PROMPT,
+			"--json",
+		];
+
+		const child = spawn("pi", args, {
+			stdio: ["ignore", "pipe", "pipe"],
+			env: process.env,
+		});
+
+		let stdout = "";
+		let stderr = "";
+
+		child.stdout.on("data", (data: Buffer) => {
+			stdout += data.toString();
+		});
+
+		child.stderr.on("data", (data: Buffer) => {
+			stderr += data.toString();
+		});
+
+		child.on("error", (err: Error) => {
+			reject(err);
+		});
+
+		child.on("close", (code: number | null) => {
+			if (code !== 0) {
+				reject(new Error(`pi subprocess failed (${code}): ${stderr}`));
+			} else {
+				resolve(extractTextFromPiOutput(stdout.trim()));
+			}
+		});
+
+		if (signal) {
+			const onAbort = () => {
+				child.kill();
+				reject(new Error("Operation aborted"));
+			};
+			signal.addEventListener("abort", onAbort, { once: true });
+			child.on("close", () => {
+				signal.removeEventListener("abort", onAbort);
+			});
+		}
+	});
+}
+
+export default function (pi: ExtensionAPI) {
+	const localRead = createReadTool(process.cwd());
+
+	// Override the read tool to intercept image reads for non-vision models
 	pi.registerTool({
 		...localRead,
 		async execute(toolCallId, params, signal, onUpdate, ctx) {
 			const { path } = params;
 			const absolutePath = resolve(ctx.cwd, path);
 
-			// Check if current model is a non-vision GLM model
-			const currentModel = ctx.model;
-			const nonVisionModels = ["glm-4.6", "glm-4.7", "glm-4.7-flash"];
-			const needsVisionProxy = currentModel?.id && nonVisionModels.includes(currentModel.id);
-
-			// If not a non-vision model, use standard read
-			if (!needsVisionProxy) {
+			// Check if we need to proxy through vision model
+			const needsVisionProxy = ctx.model?.id && NON_VISION_MODELS.includes(ctx.model.id);
+			if (!needsVisionProxy || !isImageFile(absolutePath)) {
 				return localRead.execute(toolCallId, params, signal, onUpdate);
 			}
 
-			// Check if file is an image
-			const mimeType = await readOps.detectImageMimeType?.(absolutePath);
-			if (!mimeType) {
-				// Not an image, use standard read
-				return localRead.execute(toolCallId, params, signal, onUpdate);
-			}
-
-			// Call pi subprocess with glm-4.6v to analyze the image
+			// Analyze image with vision model
 			onUpdate?.({
-				content: [{ type: "text", text: `[Analyzing image with glm-4.6v...]` }],
+				content: [{ type: "text", text: `[Analyzing image with ${VISION_MODEL}...]` }],
+				details: {},
 			});
 
 			try {
-				const result = await new Promise<{ text: string }>((resolveResult, reject) => {
-					// Use @ prefix to indicate image attachment, and absolute path
-					const args = [
-						`@${absolutePath}`,
-						"--provider",
-						"zai",
-						"--model",
-						"glm-4.6v",
-						"-p",
-						SUMMARY_PROMPT,
-						"--json", // Get structured output
-					];
-
-					const child = spawn("pi", args, {
-						stdio: ["ignore", "pipe", "pipe"],
-						env: process.env,
-					});
-
-					let stdout = "";
-					let stderr = "";
-
-					child.stdout.on("data", (data) => {
-						stdout += data.toString();
-					});
-
-					child.stderr.on("data", (data) => {
-						stderr += data.toString();
-					});
-
-					child.on("error", (err) => {
-						reject(err);
-					});
-
-					child.on("close", (code) => {
-						if (code !== 0) {
-							reject(new Error(`pi subprocess failed (${code}): ${stderr}`));
-						} else {
-							resolveResult({ text: stdout.trim() });
-						}
-					});
-
-					// Handle abort signal
-					if (signal) {
-						const onAbort = () => {
-							child.kill();
-							reject(new Error("Operation aborted"));
-						};
-						signal.addEventListener("abort", onAbort, { once: true });
-						child.on("close", () => {
-							signal.removeEventListener("abort", onAbort);
-						});
-					}
-				});
+				const summaryText = await analyzeImage({ absolutePath, signal });
 
 				if (signal?.aborted) {
 					throw new Error("Operation aborted");
 				}
 
-				// Parse the result
-				let summaryText: string;
-				try {
-					// Try to parse as JSON first
-					const json = JSON.parse(result.text);
-					// Extract message content from the response
-					if (json.messages && Array.isArray(json.messages)) {
-						// Get the last assistant message
-						const assistantMsg = json.messages.findLast((m: any) => m.role === "assistant");
-						if (assistantMsg?.content) {
-							summaryText = assistantMsg.content
-								.filter((c: any) => c.type === "text")
-								.map((c: any) => c.text)
-								.join("\n");
-						} else {
-							summaryText = result.text;
-						}
-					} else {
-						summaryText = result.text;
-					}
-				} catch {
-					// Not JSON, use as-is
-					summaryText = result.text;
-				}
-
-				const readResult = {
-					content: [
-						{
-							type: "text",
-							text: `[Image analyzed with glm-4.6v]\n\n${summaryText}`,
-						} as TextContent,
-					],
-					details: { summaryModel: "glm-4.6v" } as ReadToolDetails,
+				const result = {
+					content: [{ type: "text" as const, text: `[Image analyzed with ${VISION_MODEL}]\n\n${summaryText}` }],
+					details: {},
 				};
 
-				onUpdate?.(readResult);
-				return readResult;
-			} catch (error: any) {
-				// Throw an error so it shows as red in the UI
-				const errorMsg = `Image analysis failed with glm-4.6v: ${error.message}. The image may not be supported (e.g., animated GIFs) or there was a connection issue.`;
-				const err = new Error(errorMsg);
-				(err as any).isToolError = true; // Mark as a tool error for better handling
-				throw err;
+				onUpdate?.(result);
+				return result;
+			} catch (error) {
+				const message = error instanceof Error ? error.message : String(error);
+				throw new Error(`Image analysis failed: ${message}`);
 			}
 		},
 	});
 
-	// Add a command to manually trigger image analysis
+	// Command for manual image analysis
 	pi.registerCommand("analyze-image", {
-		description: "Analyze an image file using glm-4.6v",
+		description: `Analyze an image file using ${VISION_MODEL}`,
 		handler: async (args, ctx) => {
 			if (!ctx.hasUI) {
 				ctx.ui.notify("analyze-image requires interactive mode", "error");
@@ -212,90 +196,21 @@ export default function (pi: ExtensionAPI) {
 
 			const absolutePath = resolve(ctx.cwd, imagePath);
 
-			// Check if file is an image
-			const mimeType = await readOps.detectImageMimeType?.(absolutePath);
-			if (!mimeType) {
+			if (!isImageFile(absolutePath)) {
 				ctx.ui.notify("Not a supported image file", "error");
 				return;
 			}
 
-			// Call pi subprocess with glm-4.6v to analyze the image
 			const result = await ctx.ui.custom<string | null>((tui, theme, _kb, done) => {
 				const loader = new BorderedLoader(tui, theme, `Analyzing ${imagePath}...`);
 				loader.onAbort = () => done(null);
 
-				// Use @ prefix to indicate image attachment, and absolute path
-				const args = [
-					`@${absolutePath}`,
-					"--provider",
-					"zai",
-					"--model",
-					"glm-4.6v",
-					"-p",
-					SUMMARY_PROMPT,
-					"--json",
-				];
-
-				const child = spawn("pi", args, {
-					stdio: ["ignore", "pipe", "pipe"],
-					env: process.env,
-				});
-
-				let stdout = "";
-				let stderr = "";
-
-				child.stdout.on("data", (data) => {
-					stdout += data.toString();
-				});
-
-				child.stderr.on("data", (data) => {
-					stderr += data.toString();
-				});
-
-				child.on("error", (err) => {
-					console.error("Image analysis failed:", err);
-					ctx.ui.notify(`Analysis failed: ${err.message}`, "error");
-					done(null);
-				});
-
-				child.on("close", (code) => {
-					if (code !== 0) {
-						console.error("Image analysis failed:", stderr);
-						ctx.ui.notify(`Analysis failed: ${stderr}`, "error");
+				analyzeImage({ absolutePath, signal: loader.signal })
+					.then((text) => done(text))
+					.catch((err) => {
+						ctx.ui.notify(`Analysis failed: ${err.message}`, "error");
 						done(null);
-						return;
-					}
-
-					let summaryText: string;
-					try {
-						const json = JSON.parse(stdout);
-						if (json.messages && Array.isArray(json.messages)) {
-							const assistantMsg = json.messages.findLast((m: any) => m.role === "assistant");
-							if (assistantMsg?.content) {
-								summaryText = assistantMsg.content
-									.filter((c: any) => c.type === "text")
-									.map((c: any) => c.text)
-									.join("\n");
-							} else {
-								summaryText = stdout;
-							}
-						} else {
-							summaryText = stdout;
-						}
-					} catch {
-						summaryText = stdout;
-					}
-
-					done(summaryText);
-				});
-
-				if (loader.signal.aborted) {
-					child.kill();
-				}
-
-				loader.signal.addEventListener("abort", () => {
-					child.kill();
-				});
+					});
 
 				return loader;
 			});
@@ -305,7 +220,6 @@ export default function (pi: ExtensionAPI) {
 				return;
 			}
 
-			// Show the analysis
 			await ctx.ui.editor("Image Analysis", result);
 		},
 	});
