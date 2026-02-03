@@ -3,8 +3,7 @@
  *
  * When using non-vision GLM models (glm-4.6, glm-4.7, glm-4.7-flash), this
  * extension intercepts image reads and sends them to glm-4.6v for detailed
- * analysis using a subprocess. This provides better image understanding since
- * glm-4.6v has stronger vision capabilities.
+ * analysis using a subprocess with specialized prompts.
  *
  * Usage:
  *   pi -e npm:pi-glm-image-summary --provider zai --model glm-4.7
@@ -13,69 +12,86 @@
  * 1. Detect when a non-vision GLM model is being used
  * 2. Check if the file being read is an image
  * 3. Call pi subprocess with glm-4.6v to analyze the image
- * 4. Return the summary text to the current model
+ * 4. Return the categorized analysis to the current model
  */
 
 import { spawn } from "node:child_process";
 import { resolve } from "node:path";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { BorderedLoader, createReadTool } from "@mariozechner/pi-coding-agent";
+import { extractTextFromPiOutput, isImageFile, needsVisionProxy, VISION_MODEL, VISION_PROVIDER } from "./utils.js";
 
-// Configuration
-const VISION_PROVIDER = "zai";
-const VISION_MODEL = "glm-4.6v";
-const NON_VISION_MODELS = ["glm-4.6", "glm-4.7", "glm-4.7-flash"];
-const SUPPORTED_IMAGE_EXTENSIONS = ["jpg", "jpeg", "png", "gif", "webp"];
+// Embedded skill prompt for GLM-4.6v
+const ANALYSIS_PROMPT = `You are analyzing an image. Follow these steps:
 
-const SUMMARY_PROMPT = `Please analyze this image comprehensively. Extract ALL information from the image including:
+## Step 1: Classify
 
-1. **Overall Description**: What type of content is this? (screenshot, diagram, document, photograph, UI, code, etc.)
-2. **Text Content**: ALL visible text in the image, preserving structure and formatting. Include labels, buttons, error messages, file paths, code snippets, etc. Be exhaustive.
-3. **Visual Elements**: Colors, layout, components, icons, graphical elements
-4. **Technical Details**: For code, UI, diagrams - include exact values, class names, IDs, parameters, configurations
-5. **Contextual Information**: Window titles, terminal prompts, file names, timestamps, status indicators
-6. **Structure**: How elements are organized, relationships between components
-7. **Actionable Information**: Any visible commands, settings, configurations, or parameters that could be useful
+First, identify what type of image this is and state your classification:
 
-Format your response clearly with sections and bullet points. Be extremely thorough - the user needs to understand everything visible in this image to perform their task.`;
+**Category**: [one of: ui-screenshot, code-screenshot, error-screenshot, diagram, chart, general]
 
-// Types for pi JSON output
-interface PiMessage {
-	role: string;
-	content?: PiContentBlock[];
-}
+Categories:
+- ui-screenshot — Web or mobile interface (buttons, forms, navigation, dashboard)
+- code-screenshot — Source code visible in editor or terminal
+- error-screenshot — Error message, stack trace, terminal error, build failure
+- diagram — Architecture, flowchart, UML, ER, sequence diagram, system design
+- chart — Data visualization (bar chart, line graph, pie chart, dashboard metrics)
+- general — Photo, logo, illustration, or anything else
 
-interface PiContentBlock {
-	type: string;
-	text?: string;
-}
+## Step 2: Analyze
 
-interface PiJsonOutput {
-	messages?: PiMessage[];
-}
+Based on your classification, provide the appropriate analysis:
 
-function isImageFile(path: string): boolean {
-	const ext = path.split(".").pop()?.toLowerCase();
-	return ext !== undefined && SUPPORTED_IMAGE_EXTENSIONS.includes(ext);
-}
+### For ui-screenshot:
+- Describe the layout structure (sidebar, header, main content, footer)
+- List all visible UI components (buttons, forms, cards, tables, navigation)
+- Note the color scheme and visual style
+- Extract all visible text (labels, buttons, headings, data values)
+- Identify interactive elements and their likely functionality
 
-function extractTextFromPiOutput(output: string): string {
-	try {
-		const json: PiJsonOutput = JSON.parse(output);
-		if (json.messages && Array.isArray(json.messages)) {
-			const assistantMsg = json.messages.findLast((m: PiMessage) => m.role === "assistant");
-			if (assistantMsg?.content) {
-				return assistantMsg.content
-					.filter((c: PiContentBlock) => c.type === "text")
-					.map((c: PiContentBlock) => c.text ?? "")
-					.join("\n");
-			}
-		}
-	} catch {
-		// Not JSON, return as-is
-	}
-	return output;
-}
+### For code-screenshot:
+- Identify the programming language
+- Extract the complete code with 100% accuracy
+- Preserve exact indentation and formatting
+- Include line numbers if visible
+- Note any imports, function definitions, or key patterns
+- Output the code in a properly formatted code block
+
+### For error-screenshot:
+- Identify the error type (syntax, runtime, build, network, etc.)
+- Extract the exact error message
+- Analyze the stack trace if present (file paths, line numbers, function names)
+- Identify the root cause
+- Suggest a fix with code examples if applicable
+
+### For diagram:
+- Identify the diagram type (architecture, flowchart, UML, ER, sequence, etc.)
+- List all components/nodes shown
+- Describe relationships and connections between elements
+- Explain the data flow or structure depicted
+- Note any labels, protocols, or annotations
+
+### For chart:
+- Identify the chart type (bar, line, pie, scatter, combination, etc.)
+- Extract the title, axis labels, and legend
+- Describe the data ranges and values
+- Identify trends, patterns, or anomalies
+- Summarize the key insights from the data
+
+### For general:
+- Describe the primary subject
+- List all visible objects and elements
+- Note colors, composition, and style
+- Describe the mood or context
+- Highlight notable or interesting features
+
+## Output Format
+
+Always start your response with:
+
+**Category**: [category-name]
+
+Then provide your detailed analysis using the appropriate template above.`;
 
 interface AnalyzeImageOptions {
 	absolutePath: string;
@@ -83,16 +99,18 @@ interface AnalyzeImageOptions {
 }
 
 async function analyzeImage({ absolutePath, signal }: AnalyzeImageOptions): Promise<string> {
-	return new Promise((resolve, reject) => {
+	return new Promise((resolvePromise, reject) => {
 		const args = [
 			`@${absolutePath}`,
 			"--provider",
 			VISION_PROVIDER,
 			"--model",
 			VISION_MODEL,
-			"-p",
-			SUMMARY_PROMPT,
+			"--print",
 			"--json",
+			"--no-extensions",
+			"-p",
+			ANALYSIS_PROMPT,
 		];
 
 		const child = spawn("pi", args, {
@@ -119,7 +137,7 @@ async function analyzeImage({ absolutePath, signal }: AnalyzeImageOptions): Prom
 			if (code !== 0) {
 				reject(new Error(`pi subprocess failed (${code}): ${stderr}`));
 			} else {
-				resolve(extractTextFromPiOutput(stdout.trim()));
+				resolvePromise(extractTextFromPiOutput(stdout.trim()));
 			}
 		});
 
@@ -147,8 +165,7 @@ export default function (pi: ExtensionAPI) {
 			const absolutePath = resolve(ctx.cwd, path);
 
 			// Check if we need to proxy through vision model
-			const needsVisionProxy = ctx.model?.id && NON_VISION_MODELS.includes(ctx.model.id);
-			if (!needsVisionProxy || !isImageFile(absolutePath)) {
+			if (!needsVisionProxy(ctx.model?.id) || !isImageFile(absolutePath)) {
 				return localRead.execute(toolCallId, params, signal, onUpdate);
 			}
 
