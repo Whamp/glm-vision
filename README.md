@@ -1,4 +1,4 @@
-# pi-glm-image-summary
+# glm-vision
 
 A [pi](https://github.com/badlogic/pi-mono) extension that intercepts image reads when using non-vision GLM models and sends them to GLM-4.6v for detailed, categorized analysis.
 
