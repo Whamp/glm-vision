@@ -27,19 +27,19 @@ This approach is [48% faster and produces higher quality output](./test-fixtures
 Install globally:
 
 ```bash
-pi install npm:pi-glm-image-summary
+pi install git:github.com/Whamp/glm-vision
 ```
 
 Or install for a specific project (writes to `.pi/settings.json`):
 
 ```bash
-pi install -l npm:pi-glm-image-summary
+pi install -l git:github.com/Whamp/glm-vision
 ```
 
 To try it without installing:
 
 ```bash
-pi -e npm:pi-glm-image-summary
+pi -e git:github.com/Whamp/glm-vision
 ```
 
 ## Usage
